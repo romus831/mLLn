@@ -11,6 +11,7 @@ include(GoogleTest)
 
 add_executable(tensor_tests
   tensor_core_test.cpp
+  tensor_twenty_test.cpp
   nn_module_test.cpp
 )
 target_link_libraries(tensor_tests PRIVATE tensor GTest::gtest GTest::gtest_main CUDA::cudart CUDA::cublas)

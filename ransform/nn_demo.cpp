@@ -7,13 +7,13 @@
 using namespace MNNL;
 
 int main() {
-    std::cout << "nn_demo: MLP 2-4-1 через Sequential (Linear + Sigmoid) x2\n";
+    std::cout << "nn_demo: MLP 2-4-1 через Sequential (Linear + ReLUModule) x2\n";
 
     nn::Sequential net;
     net.emplace_back<nn::Linear>(2, 4, 11u);
-    net.emplace_back<nn::SigmoidModule>();
+    net.emplace_back<nn::ReLUModule>();
     net.emplace_back<nn::Linear>(4, 1, 13u);
-    net.emplace_back<nn::SigmoidModule>();
+    net.emplace_back<nn::ReLUModule>();
 
     Tensor<float> X({4, 2});
     const float xv[] = {0, 0, 0, 1, 1, 0, 1, 1};

@@ -271,12 +271,16 @@ namespace MNNL {
                     return;
                 }
                 auto grad_a_ptr = grad_out_cpu * (*rec.b);
+                /*std::cout << "MUL backward: grad_out = " << grad_out_cpu.data()[0]
+                    << ", b = " << rec.b->data()[0]
+                    << ", grad_a = " << (*grad_a_ptr).data()[0] << std::endl;*/
                 rec.a->grad() += *grad_a_ptr;
             }
             if (rec.b && rec.b->requires_grad()) {
                 auto grad_b_ptr = grad_out_cpu * (*rec.a);
                 rec.b->grad() += *grad_b_ptr;
             }
+
         }
 
         void backward_sum(const OpRecord& rec) {

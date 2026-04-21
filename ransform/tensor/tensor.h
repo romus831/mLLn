@@ -455,14 +455,16 @@ namespace MNNL {
         }
 
         std::shared_ptr<Tensor<float>> relu() const {
-            auto result = std::make_shared<Tensor<float>>(shape_);
+            std::shared_ptr<Tensor<float>> result;
             if (on_gpu_) {
-                result->to_gpu();
+                Tensor work(*this);
+                result = std::make_shared<Tensor<float>>(std::move(work));
                 relu_gpu_impl(result->data_gpu(), result->size());
             }
             else {
-                T* p = result->data();
-                const size_t n = result->size();
+                Tensor work = contiguous().clone();
+                T* p = work.data();
+                const size_t n = work.size();
                 const size_t vec_width = 8;
                 const size_t vec_loops = n / vec_width;
 #pragma omp parallel for if (n > OMP_THRESHOLD)
@@ -477,6 +479,7 @@ namespace MNNL {
                 for (size_t i = vec_loops * vec_width; i < n; ++i) {
                     if (p[i] < T(0)) p[i] = T(0);
                 }
+                result = std::make_shared<Tensor<float>>(std::move(work));
             }
             if (autograd::is_grad_enabled()) {
                 bool needs_grad = requires_grad_ || (this->has_grad());
@@ -603,20 +606,22 @@ namespace MNNL {
             }*/
 
         std::shared_ptr<Tensor<float>> leaky_relu(float negative_slope = 0.01f) const {
-            auto result = std::make_shared<Tensor<float>>(shape_);
+            std::shared_ptr<Tensor<float>> result;
             if (on_gpu_) {
-                result->to_gpu();
+                Tensor work(*this);
+                result = std::make_shared<Tensor<float>>(std::move(work));
                 leaky_relu_gpu_impl(result->data_gpu(), result->size(), negative_slope);
-                return result;
             }
             else {
-                T* p = result->data();
-                const size_t n = result->size();
+                Tensor work = contiguous().clone();
+                T* p = work.data();
+                const size_t n = work.size();
 #pragma omp parallel for if (n > OMP_THRESHOLD)
                 for (int i = 0; i < static_cast<int>(n); ++i) {
                     float x = p[i];
                     p[i] = x > 0.0f ? x : negative_slope * x;
                 }
+                result = std::make_shared<Tensor<float>>(std::move(work));
             }
             if (autograd::is_grad_enabled()) {
                 bool needs_grad = requires_grad_ || (this->has_grad());
@@ -704,10 +709,15 @@ namespace MNNL {
                 b.data_gpu(),
                 result->data_gpu()
             );
-            cublasDestroy(handle);
-
             if (status != CUBLAS_STATUS_SUCCESS) {
+                cublasDestroy(handle);
                 throw std::runtime_error("matmul: cublas failed");
+            }
+            cudaError_t sync_err = cudaDeviceSynchronize();
+            cublasDestroy(handle);
+            if (sync_err != cudaSuccess) {
+                throw std::runtime_error(
+                    std::string("matmul: cudaDeviceSynchronize failed: ") + cudaGetErrorString(sync_err));
             }
 
             result->on_gpu_ = true;

@@ -3,6 +3,7 @@
 #include <cstdlib>
 #include <stdexcept>
 #include "module.h"
+#include <random>
 
 namespace MNNL::nn {
 
@@ -17,8 +18,9 @@ public:
             throw std::invalid_argument("Linear: in_features and out_features must be positive");
         }
         std::srand(seed);
+        he_uniform_init_(weight_, in_features);
         random_fill_(weight_);
-        random_fill_(bias_);
+        bias_.zero();
         weight_.set_requires_grad(true);
         bias_.set_requires_grad(true);
     }
@@ -46,6 +48,13 @@ private:
         float* p = t.data();
         for (size_t i = 0; i < t.size(); ++i) {
             p[i] = (static_cast<float>(std::rand()) / static_cast<float>(RAND_MAX)) - 0.5f;
+        }
+    }
+    static void he_uniform_init_(Tensor<float>& t, size_t fan_in) {
+        float bound = std::sqrt(6.0f / fan_in);
+        float* p = t.data();
+        for (size_t i = 0; i < t.size(); ++i) {
+            p[i] = (static_cast<float>(std::rand()) / RAND_MAX) * 2.0f * bound - bound;
         }
     }
 };
