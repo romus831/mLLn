@@ -10,7 +10,6 @@ using namespace MNNL;
 
 //#define TRAIN 0
 
-// Случайная инициализация в диапазоне [-0.5, 0.5]
 void random_init(Tensor<float>& t) {
     float* data = t.data();
     for (size_t i = 0; i < t.size(); ++i) {
@@ -18,7 +17,6 @@ void random_init(Tensor<float>& t) {
     }
 }
 
-// Для отладки градиентов (используется только при обучении)
 auto print_grad = [](const Tensor<float>& t, const std::string& name) {
     if (!t.has_grad()) { std::cout << name << " grad: none\n"; return; }
     const float* g = t.grad().data();
@@ -30,7 +28,6 @@ auto print_grad = [](const Tensor<float>& t, const std::string& name) {
 int main() {
     std::srand(static_cast<unsigned>(std::time(nullptr)));
 
-    // Данные XOR
     std::vector<float> x_vals = { 0,0, 0,1, 1,0, 1,1 };
     std::vector<float> y_vals = { 0, 1, 1, 0 };
 
@@ -39,12 +36,10 @@ int main() {
     std::copy(x_vals.begin(), x_vals.end(), X.data());
     std::copy(y_vals.begin(), y_vals.end(), Y.data());
 
-    // Архитектура
     const size_t input_size = 2;
     const size_t hidden_size = 10;
     const size_t output_size = 1;
 
-    // Путь к файлу модели (относительно рабочей директории)
     const std::string model_path = "../../xor_model.bin";
 
 #ifdef TRAIN

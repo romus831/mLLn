@@ -13,9 +13,9 @@
 #include <cublas_v2.h>
 #include "math/gemm.h"
 #include "core/autograd.h"
+#include "concepts.h"
 
 namespace MNNL {
-
     struct AlignedDeleter {
         void operator()(void* ptr) const noexcept {
 #ifdef _WIN32
@@ -32,10 +32,9 @@ namespace MNNL {
         }
     };
 
-    template <typename T = float>
-    class Tensor : public std::enable_shared_from_this<Tensor<float>> {
-        static_assert(std::is_same_v<T, float>, "SIMD operations are currently supported only for float.");
-
+template<ArithmeticType T>
+class Tensor : public std::enable_shared_from_this<Tensor<T>> {
+        //static_assert(std::is_same_v<T, float>, "SIMD operations are currently supported only for float.");
     public:
 
         Tensor() noexcept
@@ -55,7 +54,7 @@ namespace MNNL {
                 throw std::bad_alloc();
 #endif
             data_ = std::shared_ptr<T[]>(static_cast<T*>(ptr), AlignedDeleter{});
-            compute_contiguous_strides();
+            ComputeContiguousStrides();
         }
 
         Tensor(const std::vector<size_t>& shape,
@@ -73,7 +72,7 @@ namespace MNNL {
         Tensor& operator=(Tensor&& other) noexcept;
         Tensor& operator=(const Tensor&) = delete;
 
-        ~Tensor();
+        ~Tensor() noexcept;
 
         template <typename... Idx>
         T& operator()(Idx... indices) {
@@ -106,7 +105,7 @@ namespace MNNL {
                     throw std::out_of_range("slice: out of bounds");
                 new_offset += starts[i] * strides_[i];
             }
-            return Tensor(new_shape, new_strides, data_, new_offset);
+            return static_cast<Tensor>(Tensor(new_shape, new_strides, data_, new_offset));
         }
 
         Tensor reshape(const std::vector<size_t>& new_shape) const {
@@ -121,12 +120,12 @@ namespace MNNL {
                 new_strides[i] = stride;
                 stride *= new_shape[i];
             }
-            return Tensor(new_shape, new_strides, data_, offset_);
+            return static_cast<Tensor>(Tensor(Tensor(new_shape, new_strides, data_, offset_)));
         }
 
         Tensor contiguous() const {
             if (is_contiguous()) {
-                return Tensor(*this);
+                return static_cast<Tensor>(*this);
             }
             return clone();
         }
@@ -143,7 +142,7 @@ namespace MNNL {
                 new_shape[i] = shape_[src];
                 new_strides[i] = strides_[src];
             }
-            return Tensor(new_shape, new_strides, data_, offset_);
+            return static_cast<Tensor>(Tensor(new_shape, new_strides, data_, offset_));
         }
 
         Tensor transpose() const {
@@ -152,14 +151,14 @@ namespace MNNL {
             return permute({ 1, 0 });
         }
 
-        Tensor clone() const {
+        [[nodiscard]] Tensor clone() const {
             Tensor copy(shape_);
             if (is_contiguous()) {
                 std::copy_n(data_.get() + offset_, total_size_, copy.data_.get());
             }
             else {
                 T* dest_ptr = copy.data_.get();
-                multi_dim_copy(dest_ptr);
+                MultiDimCopy(dest_ptr);
             }
             return copy;
         }
@@ -211,7 +210,7 @@ namespace MNNL {
 
         Tensor broadcast_to(const std::vector<size_t>& target_shape) const {
             if (shape_ == target_shape) {
-                return Tensor(*this);
+                return static_cast<Tensor>(*this);
             }
             std::vector<size_t> new_strides(target_shape.size(), 0);
             int src_dim = static_cast<int>(shape_.size()) - 1;
@@ -249,7 +248,7 @@ namespace MNNL {
             if (!view.is_contiguous()) {
                 return view.clone();
             }
-            return Tensor(std::move(view));
+            return static_cast<Tensor>(std::move(view));
         }
 
        float* data_gpu() { return gpu_data_.get(); }
@@ -267,43 +266,43 @@ namespace MNNL {
             return t;
         }
 
-        std::shared_ptr<Tensor<float>> operator+(const Tensor& other) const {
+        std::shared_ptr<Tensor<T>> operator+(const Tensor& other) const {
             auto result_shape = broadcast_shapes(shape_, other.shape_);
-            auto result = std::make_shared<Tensor<float>>(result_shape);
+            auto result = std::make_shared<Tensor<T>>(result_shape);
             if (on_gpu_ && other.on_gpu_) {
-                *result = elementwise_op(other, GPUOp::ADD);
+                *result = ElementwiseOp(other, GPUOp::kADD);
             }
             else {
                 Tensor a = this->contiguous();
                 Tensor b = other.contiguous();
                 if (a.on_gpu_) a.to_cpu();
                 if (b.on_gpu_) b.to_cpu();
-                *result = a.elementwise_binary(b, std::plus<T>{});
+                *result = a.ElementwiseBinary(b, std::plus<T>{});
             }
             if (autograd::is_grad_enabled() && (requires_grad_ || other.requires_grad_)) {
                 result->set_requires_grad(true);
                 autograd::OpRecord rec = {};
                 rec.type = autograd::OpType::ADD;
-                rec.a = const_cast<Tensor<float>*>(this);
-                rec.b = const_cast<Tensor<float>*>(&other);
+                rec.a = const_cast<Tensor<T>*>(this);
+                rec.b = const_cast<Tensor<T>*>(&other);
                 rec.out = result.get();
                 autograd::push_record(std::move(rec));
             }
             return result;
         }
 
-        std::shared_ptr<Tensor<float>> operator-(const Tensor& other) const {
+        [[nodiscard]] std::shared_ptr<Tensor<float>> operator-(const Tensor& other) const {
             auto result_shape = broadcast_shapes(shape_, other.shape_);
             auto result = std::make_shared<Tensor<float>>(result_shape);
             if (on_gpu_ && other.on_gpu_) {
-                *result = elementwise_op(other, GPUOp::SUB);
+                *result = ElementwiseOp(other, GPUOp::kSUB);
             }
             else {
                 Tensor a = this->contiguous();
                 Tensor b = other.contiguous();
                 if (a.on_gpu_) a.to_cpu();
                 if (b.on_gpu_) b.to_cpu();
-                *result = a.elementwise_binary(b, std::minus<T>{});
+                *result = a.ElementwiseBinary(b, std::minus<T>{});
             }
             if (autograd::is_grad_enabled() && (requires_grad_ || other.requires_grad_)) {
                 result->set_requires_grad(true);
@@ -317,18 +316,18 @@ namespace MNNL {
             return result;
         }
 
-        std::shared_ptr<Tensor<float>> operator*(const Tensor& other) const {
+        [[nodiscard]] std::shared_ptr<Tensor<float>> operator*(const Tensor& other) const {
             auto result_shape = broadcast_shapes(shape_, other.shape_);
             auto result = std::make_shared<Tensor<float>>(result_shape);
             if (on_gpu_ && other.on_gpu_) {
-                *result = elementwise_op(other, GPUOp::MUL);
+                *result = ElementwiseOp(other, GPUOp::kMUL);
             }
             else {
                 Tensor a = this->contiguous();
                 Tensor b = other.contiguous();
                 if (a.on_gpu_) a.to_cpu();
                 if (b.on_gpu_) b.to_cpu();
-                *result = a.elementwise_binary(b, std::multiplies<T>{});
+                *result = a.ElementwiseBinary(b, std::multiplies<T>{});
             }
             if (autograd::is_grad_enabled() && (requires_grad_ || other.requires_grad_)) {
                 result->set_requires_grad(true);
@@ -343,7 +342,7 @@ namespace MNNL {
         }
 
 
-        Tensor operator*(float scalar) const {
+        [[nodiscard]] Tensor operator*(float scalar) const {
             Tensor result(shape_);
             const T* src = data();
             T* dst = result.data();
@@ -351,22 +350,22 @@ namespace MNNL {
             return result;
         }
 
-        friend Tensor operator*(float scalar, const Tensor& t) {
+        [[nodiscard]] friend Tensor operator*(float scalar, const Tensor& t) {
             return t * scalar;
         }
 
-        std::shared_ptr<Tensor<float>> operator/(const Tensor& other) const {
+        [[nodiscard]] std::shared_ptr<Tensor<float>> operator/(const Tensor& other) const {
             auto result_shape = broadcast_shapes(shape_, other.shape_);
             auto result = std::make_shared<Tensor<float>>(result_shape);
             if (on_gpu_ && other.on_gpu_) {
-                *result = elementwise_op(other, GPUOp::DIV);
+                *result = ElementwiseOp(other, GPUOp::kDIV);
             }
             else {
                 Tensor a = this->contiguous();
                 Tensor b = other.contiguous();
                 if (a.on_gpu_) a.to_cpu();
                 if (b.on_gpu_) b.to_cpu();
-                *result = a.elementwise_binary(b, divides_with_check{});
+                *result = a.ElementwiseBinary(b, divides_with_check{});
             }
             if (autograd::is_grad_enabled() && (requires_grad_ || other.requires_grad_)) {
                 result->set_requires_grad(true);
@@ -380,54 +379,25 @@ namespace MNNL {
             return result;
         }
 
-        Tensor& operator+=(const Tensor& other) {
+        [[nodiscard]] Tensor& operator+=(const Tensor& other) {
             add_(other);
             return *this;
         }
 
-        Tensor operator>(float threshold) const {
+        Tensor operator>(float threshold) const noexcept {
             Tensor result(shape_);
             const T* src = data();
             T* dst = result.data();
             for (size_t i = 0; i < size(); ++i) dst[i] = (src[i] > threshold) ? 1.0f : 0.0f;
             return result;
         }
-        Tensor operator<=(float threshold) const {
+        Tensor operator<=(float threshold) const noexcept {
             Tensor result(shape_);
             const T* src = data();
             T* dst = result.data();
             for (size_t i = 0; i < size(); ++i) dst[i] = (src[i] <= threshold) ? 1.0f : 0.0f;
             return result;
         }
-
-
-        /*Tensor& add_(const Tensor& other) {
-            auto common = broadcast_shapes(shape_, other.shape_);
-            if (common != shape_) {
-                throw std::runtime_error("In-place add requires left side to already have broadcast shape");
-            }
-            Tensor b = other.broadcast_to(shape_);
-            if (!is_contiguous() || !b.is_contiguous()) {
-                throw std::runtime_error("SIMD requires contiguous tensors");
-            }
-            const size_t vec_width = 8;
-            const size_t n = size();
-            const size_t vec_loops = n / vec_width;
-            T* this_ptr = data();
-            const T* b_ptr = b.data();
-#pragma omp parallel for if (n > OMP_THRESHOLD)
-            for (int i = 0; i < static_cast<int>(vec_loops); ++i) {
-                size_t idx = i * vec_width;
-                __m256 this_vec = _mm256_load_ps(this_ptr + idx);
-                __m256 b_vec = _mm256_load_ps(b_ptr + idx);
-                __m256 res_vec = _mm256_add_ps(this_vec, b_vec);
-                _mm256_store_ps(this_ptr + idx, res_vec);
-            }
-            for (size_t i = vec_loops * vec_width; i < n; ++i) {
-                this_ptr[i] += b_ptr[i];
-            }
-            return *this;
-        }*/
 
         Tensor& add_(const Tensor& other) {
             auto common = broadcast_shapes(shape_, other.shape_);
@@ -498,7 +468,6 @@ namespace MNNL {
         }
 
         std::shared_ptr<Tensor<float>> sigmoid() const {
-            // 1. Создаём копию входных данных (contiguous)
             Tensor result_cpu = this->contiguous().clone();
 
             if (on_gpu_) {
@@ -506,7 +475,6 @@ namespace MNNL {
                 sigmoid_gpu_impl(result_cpu.data_gpu(), result_cpu.size());
                 auto result = std::make_shared<Tensor<float>>(std::move(result_cpu));
                 result->on_gpu_ = true;
-                // Autograd
                 if (autograd::is_grad_enabled()) {
                     result->set_requires_grad(true);
                     autograd::OpRecord rec{};
@@ -524,7 +492,6 @@ namespace MNNL {
                     p[i] = 1.0f / (1.0f + std::exp(-p[i]));
                 }
                 auto result = std::make_shared<Tensor<float>>(std::move(result_cpu));
-                // Autograd
                 if (autograd::is_grad_enabled()) {
                     result->set_requires_grad(true);
                     autograd::OpRecord rec{};
@@ -538,7 +505,6 @@ namespace MNNL {
         }
 
         std::shared_ptr<Tensor<float>> tanh() const {
-            // 1. Создаём копию входных данных (contiguous)
             Tensor result_cpu = this->contiguous().clone();
 
             if (on_gpu_) {
@@ -546,7 +512,6 @@ namespace MNNL {
                 tanh_gpu_impl(result_cpu.data_gpu(), result_cpu.size());
                 auto result = std::make_shared<Tensor<float>>(std::move(result_cpu));
                 result->on_gpu_ = true;
-                // Autograd
                 if (autograd::is_grad_enabled()) {
                     result->set_requires_grad(true);
                     autograd::OpRecord rec{};
@@ -575,35 +540,6 @@ namespace MNNL {
                 return result;
             }
         }
-
-            /*std::shared_ptr<Tensor<float>> tanh() const {
-                auto result = std::make_shared<Tensor<float>>(shape_);
-                if (on_gpu_) {
-                    result->to_gpu();
-                    tanh_gpu_impl(result->data_gpu(), result->size());
-                }
-                else {
-                    T* p = result->data();
-                    const size_t n = result->size();
-#pragma omp parallel for if (n > OMP_THRESHOLD)
-                    for (int i = 0; i < static_cast<int>(n); ++i) {
-                        p[i] = std::tanh(p[i]);
-                    }
-                }
-                if (autograd::is_grad_enabled()) {
-                    bool needs_grad = requires_grad_ || (this->has_grad());
-                    if (needs_grad || true) {
-                        result->set_requires_grad(true);
-
-                        autograd::OpRecord rec = {};
-                        rec.type = autograd::OpType::TANH;
-                        rec.a = const_cast<Tensor<float>*>(this);
-                        rec.out = result.get();
-                        autograd::push_record(std::move(rec));
-                    }
-                }
-                return result;
-            }*/
 
         std::shared_ptr<Tensor<float>> leaky_relu(float negative_slope = 0.01f) const {
             std::shared_ptr<Tensor<float>> result;
@@ -693,7 +629,6 @@ namespace MNNL {
 
             auto result = std::make_shared<Tensor<float>>(std::vector<size_t>{m, n});
 
-            // GPU вычисление
             Tensor a = this->contiguous();
             Tensor b = other.contiguous();
             a.to_gpu();
@@ -737,7 +672,6 @@ namespace MNNL {
             return result;
         }
 
-        // === Autograd related methods ===
         void set_requires_grad(bool req) { requires_grad_ = req; }
         bool requires_grad() const { return requires_grad_; }
 
@@ -747,12 +681,8 @@ namespace MNNL {
 
         void ensure_grad() {
             if (shape_.empty()) {
-                //throw std::runtime_error("ensure_grad: empty shape");
             }
             if (!has_grad()) {
-                //std::cout << "[ensure_grad] Creating new grad for shape "
-                    //<< shape()[0] << "x" << shape()[1] << std::endl;
-
                 grad_ = std::make_shared<Tensor<float>>(shape_);
                 grad_->on_gpu_ = false;
                 grad_->gpu_data_.reset();
@@ -782,7 +712,6 @@ namespace MNNL {
         }
         
         void backward();
-
         void to_gpu();
         void to_cpu();
         bool is_gpu() const { return on_gpu_; }
@@ -793,14 +722,12 @@ namespace MNNL {
         std::shared_ptr<T[]> data_;
         size_t offset_;
         size_t total_size_;
-
-        std::unique_ptr<float, CudaDeleter> gpu_data_;
+        std::unique_ptr<float[], CudaDeleter> gpu_data_;
         bool on_gpu_ = false;
-
         bool requires_grad_ = false;
         std::shared_ptr<Tensor<float>> grad_;
         
-        void compute_contiguous_strides() {
+        void ComputeContiguousStrides() {
             strides_.resize(shape_.size());
             size_t stride = 1;
             for (size_t i = shape_.size(); i-- > 0;) {
@@ -817,29 +744,26 @@ namespace MNNL {
         };
 
         template <typename BinaryOp>
-        Tensor elementwise_binary(const Tensor& other, BinaryOp op) const {
+        Tensor ElementwiseBinary(const Tensor& other, BinaryOp op) const {
             auto common = broadcast_shapes(shape_, other.shape_);
             Tensor a = this->broadcast_to(common);
             Tensor b = other.broadcast_to(common);
             Tensor result(common);
-
             if (!a.is_contiguous() || !b.is_contiguous())
                 throw std::runtime_error("SIMD requires contiguous tensors");
-
             const size_t vec_width = 8;
             const size_t n = result.size();
             const size_t vec_loops = n / vec_width;
-
             T* res_ptr = result.data();
             const T* a_ptr = a.data();
             const T* b_ptr = b.data();
 
-            perform_elementwise(res_ptr, a_ptr, b_ptr, n, vec_loops, op);
+            PerformElementwise(res_ptr, a_ptr, b_ptr, n, vec_loops, op);
             return result;
         }
 
         template <typename BinaryOp>
-        void perform_elementwise(T* res, const T* a, const T* b, size_t n, size_t vec_loops, BinaryOp op) const {
+        void PerformElementwise(T* res, const T* a, const T* b, size_t n, size_t vec_loops, BinaryOp op) const {
 #pragma omp parallel for if (n > OMP_THRESHOLD)
             for (int i = 0; i < static_cast<int>(vec_loops); ++i) {
                 size_t idx = i * 8;
@@ -875,64 +799,55 @@ namespace MNNL {
                 res[i] = op(a[i], b[i]);
         }
 
-        void multi_dim_copy(T* dest) const {
+        void MultiDimCopy(T* dest) const {
             std::vector<size_t> idx(ndim(), 0);
             for (size_t flat = 0; flat < total_size_; ++flat) {
                 size_t src_idx = offset_;
                 for (size_t d = 0; d < ndim(); ++d)
                     src_idx += idx[d] * strides_[d];
                 *dest++ = data_.get()[src_idx];
-
                 for (size_t d = ndim() - 1; d != static_cast<size_t>(-1); --d) {
                     if (++idx[d] < shape_[d]) break;
                     idx[d] = 0;
                 }
             }
         }
-        enum class GPUOp { ADD, SUB, MUL, DIV };
 
-        Tensor elementwise_op(const Tensor& other, GPUOp op) const {
+        enum class GPUOp { kADD, kSUB, kMUL, kDIV };
+
+        Tensor ElementwiseOp(const Tensor& other, GPUOp op) const {
             auto common = broadcast_shapes(shape_, other.shape_);
-
             if (on_gpu_ && other.on_gpu_) {
-                // GPU путь
                 Tensor a = this->contiguous().broadcast_to(common);
                 Tensor b = other.contiguous().broadcast_to(common);
-
                 a.to_gpu();
                 b.to_gpu();
-
                 Tensor result(common);
                 result.to_gpu();
-                
-
                 switch (op) {
-                    case GPUOp::ADD:
+                    case GPUOp::kADD:
                         add_gpu_impl(a.data_gpu(), b.data_gpu(), result.data_gpu(), result.size());
                         break;
-                    case GPUOp::SUB:
+                    case GPUOp::kSUB:
                         sub_gpu_impl(a.data_gpu(), b.data_gpu(), result.data_gpu(), result.size());
                         break;
-                    case GPUOp::MUL:
+                    case GPUOp::kMUL:
                         mul_gpu_impl(a.data_gpu(), b.data_gpu(), result.data_gpu(), result.size());
                         break;
-                    case GPUOp::DIV:
+                    case GPUOp::kDIV:
                         div_gpu_impl(a.data_gpu(), b.data_gpu(), result.data_gpu(), result.size());
                         break;
                 }
-
                 result.on_gpu_ = true;
                 return result;
             }
-
-            // CPU fallback
             switch (op) {
-                case GPUOp::ADD: return elementwise_binary(other, std::plus<T>{});
-                case GPUOp::SUB: return elementwise_binary(other, std::minus<T>{});
-                case GPUOp::MUL: return elementwise_binary(other, std::multiplies<T>{});
-                case GPUOp::DIV: return elementwise_binary(other, divides_with_check{});
+                case GPUOp::kADD: return ElementwiseBinary(other, std::plus<T>{});
+                case GPUOp::kSUB: return ElementwiseBinary(other, std::minus<T>{});
+                case GPUOp::kMUL: return ElementwiseBinary(other, std::multiplies<T>{});
+                case GPUOp::kDIV: return ElementwiseBinary(other, divides_with_check{});
             }
-            return Tensor{}; // never reached
+            return Tensor{};
         }
     };
 }

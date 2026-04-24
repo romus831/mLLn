@@ -3,9 +3,12 @@
 #include <functional>
 #include <vector>
 #include <memory>
+#include "concepts.h"
 
 namespace MNNL {
-    template <typename T> class Tensor;
+
+    template<ArithmeticType T>
+    class Tensor;
 }
 
 namespace MNNL {
