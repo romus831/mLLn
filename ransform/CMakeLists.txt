@@ -5,7 +5,6 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(CUDAToolkit REQUIRED)
 add_subdirectory(tensor)
 
-# Демо: общий тестовый main; xor — минимальный пример обучения MLP (тема ВКР).
 add_executable(my_lm main.cpp)
 target_link_libraries(my_lm PRIVATE tensor CUDA::cudart CUDA::cublas)
 target_include_directories(my_lm PRIVATE tensor)

@@ -135,15 +135,12 @@ static inline void launch_fused_kernel(
 ) {
     if (n == 0) return;
     int blockSize = 256;
-    // Каждый поток обрабатывает 4 элемента
     int gridSize = (n + blockSize * 4 - 1) / (blockSize * 4);
     fused_binary_activation_kernel << <gridSize, blockSize >> > (
         a, b, c, n, binary_op, act_op, leaky_slope
         );
-        CUDA_KERNEL_CHECK();
-    if (!async) {
-        CUDA_CHECK(cudaDeviceSynchronize());
-    }
+    CUDA_KERNEL_CHECK();
+    CUDA_CHECK(cudaDeviceSynchronize());
 }
 
 void add_gpu_impl(const float* a, const float* b, float* c, size_t n) {
@@ -168,9 +165,7 @@ void relu_gpu_impl(float* data, size_t n) {
     int gridSize = (n + blockSize - 1) / blockSize;
     relu_kernel << <gridSize, blockSize >> > (data, n);
     CUDA_KERNEL_CHECK();
-    if (!async) {
-        CUDA_CHECK(cudaDeviceSynchronize());
-    }
+    CUDA_CHECK(cudaDeviceSynchronize());
 }
 void leaky_relu_gpu_impl(float* data, size_t n, float negative_slope) {
     if (n == 0) return;
@@ -178,9 +173,7 @@ void leaky_relu_gpu_impl(float* data, size_t n, float negative_slope) {
     int gridSize = (n + blockSize - 1) / blockSize;
     leaky_relu_kernel << <gridSize, blockSize >> > (data, n, negative_slope);
     CUDA_KERNEL_CHECK();
-    if (!async) {
-        CUDA_CHECK(cudaDeviceSynchronize());
-    }
+    CUDA_CHECK(cudaDeviceSynchronize());
 }
 
 void sigmoid_gpu_impl(float* data, size_t n) {
@@ -189,9 +182,7 @@ void sigmoid_gpu_impl(float* data, size_t n) {
     int gridSize = (n + blockSize - 1) / blockSize;
     sigmoid_kernel << <gridSize, blockSize >> > (data, n);
     CUDA_KERNEL_CHECK();
-    if (!async) {
-        CUDA_CHECK(cudaDeviceSynchronize());
-    }
+    CUDA_CHECK(cudaDeviceSynchronize());
 }
 
 void tanh_gpu_impl(float* data, size_t n) {
@@ -200,9 +191,7 @@ void tanh_gpu_impl(float* data, size_t n) {
     int gridSize = (n + blockSize - 1) / blockSize;
     tanh_kernel << <gridSize, blockSize >> > (data, n);
     CUDA_KERNEL_CHECK();
-    if (!async) {
-        CUDA_CHECK(cudaDeviceSynchronize());
-    }
+    CUDA_CHECK(cudaDeviceSynchronize());
 }
 
 void fused_binary_activation_gpu_impl(

@@ -31,19 +31,22 @@ namespace MNNL {
         }
 
         inline void prepare_backward_inputs(const OpRecord& rec) {
-            if (rec.out) {
-                rec.out->to_cpu();
-                rec.out->grad().to_cpu();
+            LOCK_WEAK(out, rec.out);
+            if (out) {
+                out->to_cpu();
+                out->grad().to_cpu();
             }
-            if (rec.a) rec.a->to_cpu();
-            if (rec.b) rec.b->to_cpu();
-            if (rec.a && rec.a->requires_grad()) {
-                rec.a->ensure_grad();
-                rec.a->grad().to_cpu();
+            LOCK_WEAK(a, rec.a);
+            if (a) a->to_cpu();
+            LOCK_WEAK(b, rec.b);
+            if (b) b->to_cpu();
+            if (a && a->requires_grad()) {
+                a->ensure_grad();
+                a->grad().to_cpu();
             }
-            if (rec.b && rec.b->requires_grad()) {
-                rec.b->ensure_grad();
-                rec.b->grad().to_cpu();
+            if (b && b->requires_grad()) {
+                b->ensure_grad();
+                b->grad().to_cpu();
             }
         }
 
@@ -98,43 +101,48 @@ namespace MNNL {
         }
 
         void backward_add(const OpRecord& rec) {
-            if (!rec.out) return;
-            prepare_backward_inputs(rec);
-            Tensor<float> grad_out_cpu = rec.out->grad().contiguous();
-
-            if (rec.a && rec.a->requires_grad()) {
-                Tensor<float> grad_a = reduce_grad(grad_out_cpu, rec.a->shape());
-                rec.a->grad() += grad_a;
+            LOCK_WEAK_OR_RETURN(out, rec.out);
+            prepare_backward_inputs(rec);;
+            Tensor<float> grad_out_cpu = out->grad().contiguous();
+            LOCK_WEAK(a, rec.a);
+            if (a && a->requires_grad()) {
+                Tensor<float> grad_a = reduce_grad(grad_out_cpu, a->shape());
+                a->grad() += grad_a;
             }
-            if (rec.b && rec.b->requires_grad()) {
-                Tensor<float> grad_b = reduce_grad(grad_out_cpu, rec.b->shape());
-                rec.b->grad() += grad_b;
+            LOCK_WEAK(b, rec.b);
+            if (b && b->requires_grad()) {
+                Tensor<float> grad_b = reduce_grad(grad_out_cpu, b->shape());
+                b->grad() += grad_b;
             }
         }
 
         void backward_sub(const OpRecord& rec) {
-            if (!rec.out) return;
+            LOCK_WEAK_OR_RETURN(out, rec.out);
             prepare_backward_inputs(rec);
-            Tensor<float> grad_out_cpu = rec.out->grad().contiguous();
-
-            if (rec.a && rec.a->requires_grad()) {
-                Tensor<float> grad_a = reduce_grad(grad_out_cpu, rec.a->shape());
-                rec.a->grad() += grad_a;
+            Tensor<float> grad_out_cpu = out->grad().contiguous();
+            LOCK_WEAK(a, rec.a);
+            if (a && a->requires_grad()) {
+                Tensor<float> grad_a = reduce_grad(grad_out_cpu, a->shape());
+                a->grad() += grad_a;
             }
-            if (rec.b && rec.b->requires_grad()) {
+            LOCK_WEAK(b, rec.b);
+            if (b && b->requires_grad()) {
                 Tensor<float> grad_b_full = grad_out_cpu * (-1.0f);
-                Tensor<float> grad_b = reduce_grad(grad_b_full, rec.b->shape());
-                rec.b->grad() += grad_b;
+                Tensor<float> grad_b = reduce_grad(grad_b_full, b->shape());
+                b->grad() += grad_b;
             }
         }
 
         void backward_matmul(const OpRecord& rec) { 
-            if (!rec.out) return; prepare_backward_inputs(rec);
-            const Tensor<float>& grad_out = rec.out->grad();
+            LOCK_WEAK_OR_RETURN(out, rec.out);
+            prepare_backward_inputs(rec);
+            const Tensor<float>& grad_out = out->grad();
             Tensor<float> grad_contig = grad_out.contiguous();
-            Tensor<float> A_contig = rec.a->contiguous();
-            Tensor<float> B_contig = rec.b->contiguous(); 
-            if (rec.a && rec.a->requires_grad()) { 
+            LOCK_WEAK(a, rec.a);
+            Tensor<float> A_contig = a->contiguous();
+            LOCK_WEAK(b, rec.b);
+            Tensor<float> B_contig = b->contiguous(); 
+            if (a && a->requires_grad()) { 
                 size_t m = A_contig.shape()[0]; 
                 size_t k = A_contig.shape()[1]; 
                 size_t n = B_contig.shape()[1]; 
@@ -153,9 +161,9 @@ namespace MNNL {
                         dA_data[i * k + j] = sum;
                     }
                 } 
-                rec.a->grad() += dA; 
+                a->grad() += dA; 
             } 
-            if (rec.b && rec.b->requires_grad()) {
+            if (b && b->requires_grad()) {
                 size_t m = A_contig.shape()[0]; 
                 size_t k = A_contig.shape()[1]; 
                 size_t n = B_contig.shape()[1]; 
@@ -174,80 +182,93 @@ namespace MNNL {
                         dB_data[i * n + j] = sum; 
                     } 
                 } 
-                rec.b->grad() += dB;
+                b->grad() += dB;
             } 
         }
 
         void backward_div(const OpRecord& rec) {
-            if (!rec.out) return;
+            LOCK_WEAK_OR_RETURN(out, rec.out);
             prepare_backward_inputs(rec);
-            const Tensor<float> grad_out = rec.out->grad().contiguous();
-            if (rec.a && rec.a->requires_grad()) {
-                auto grad_a_sp = grad_out / (*rec.b);
-                rec.a->grad() += reduce_grad(*grad_a_sp, rec.a->shape());
+            const Tensor<float> grad_out = out->grad().contiguous();
+            LOCK_WEAK(a, rec.a);
+            LOCK_WEAK(b, rec.b);
+            if (a && a->requires_grad()) {
+                auto grad_a_sp = grad_out / (*b);
+                a->grad() += reduce_grad(*grad_a_sp, a->shape());
             }
-            if (rec.b && rec.b->requires_grad()) {
-                const Tensor<float> a = *rec.a;
-                const Tensor<float> b = *rec.b;
-                auto b_squared = b * b;
-                auto numerator = grad_out * a;
+            if (b && b->requires_grad()) {
+                const Tensor<float> aa = *a;
+                const Tensor<float> bb = *b;
+                auto b_squared = bb * bb;
+                auto numerator = grad_out * aa;
                 auto fraction = *numerator / *b_squared;
                 Tensor<float> grad_b = *fraction * (-1.0f);
-                rec.b->grad() += reduce_grad(grad_b, rec.b->shape());
+                b->grad() += reduce_grad(grad_b, b->shape());
             }
         }
 
         void backward_relu(const OpRecord& rec) {
-            if (!rec.out || !rec.a) return;
+            LOCK_WEAK(out, rec.out);
+            LOCK_WEAK(a, rec.a);
+            LOCK_WEAK(b, rec.b);
+            if (!out || !a) return;
             prepare_backward_inputs(rec);
-            Tensor<float> mask = (*rec.a) > 0.0f;
-            Tensor<float> grad_out_cpu = rec.out->grad().contiguous();
+            Tensor<float> mask = (*a) > 0.0f;
+            Tensor<float> grad_out_cpu = out->grad().contiguous();
             auto grad = grad_out_cpu * mask;
-            rec.a->grad() += *grad;
+            a->grad() += *grad;
         }
 
         void backward_leaky_relu(const OpRecord& rec) {
-            if (!rec.out || !rec.a) return;
+            LOCK_WEAK(out, rec.out);
+            LOCK_WEAK(a, rec.a);
+            LOCK_WEAK(b, rec.b);
+            if (!out || !a) return;
             prepare_backward_inputs(rec);
-            Tensor<float> mask_pos = (*rec.a) > 0.0f;
-            Tensor<float> mask_neg = (*rec.a) <= 0.0f;
+            Tensor<float> mask_pos = (*a) > 0.0f;
+            Tensor<float> mask_neg = (*a) <= 0.0f;
             Tensor<float> coeff = *(mask_pos + (rec.leaky_slope * mask_neg));
-            Tensor<float> grad_out_cpu = rec.out->grad().contiguous();
+            Tensor<float> grad_out_cpu = out->grad().contiguous();
             auto grad_a = grad_out_cpu * coeff;
-            rec.a->grad() += *grad_a;
+            a->grad() += *grad_a;
             
         }
 
         void backward_sigmoid(const OpRecord& rec) {
-            if (!rec.out || !rec.a) return;
+            LOCK_WEAK(out, rec.out);
+            LOCK_WEAK(a, rec.a);
+            if (!out || !a) return;
             prepare_backward_inputs(rec);
 
-            Tensor<float> grad_out_cpu = rec.out->grad().contiguous();
+            Tensor<float> grad_out_cpu = out->grad().contiguous();
 
-            const Tensor<float>& out = *rec.out;
-            const Tensor<float>& g_out = rec.out->grad();
+            const Tensor<float>& oout = *out;
+            const Tensor<float>& g_out = out->grad();
 
-            Tensor<float> grad_input(out.shape());
+            Tensor<float> grad_input(oout.shape());
             grad_input.zero();
 
-            const float* o = out.data();
+            const float* o = oout.data();
             const float* g = grad_out_cpu.data();
             float* gi = grad_input.data();
-            size_t n = out.size();
+            size_t n = oout.size();
 
             for (size_t i = 0; i < n; ++i) {
                 float s = o[i];
                 gi[i] = g[i] * s * (1.0f - s);
             }
 
-            rec.a->grad() += grad_input;
+            a->grad() += grad_input;
         }
 
         void backward_tanh(const OpRecord& rec) {
-            if (!rec.out || !rec.a) return;
+            LOCK_WEAK(out, rec.out);
+            LOCK_WEAK(a, rec.a);
+            LOCK_WEAK(b, rec.b);
+            if (!out || !a) return;
             prepare_backward_inputs(rec);
-            Tensor<float> grad_out_cpu = rec.out->grad().contiguous();
-            const Tensor<float>& output = *rec.out;
+            Tensor<float> grad_out_cpu = out->grad().contiguous();
+            const Tensor<float>& output = *out;
             Tensor<float> grad_input(output.shape());
             grad_input.zero();
             const float* out_data = output.data();
@@ -258,40 +279,42 @@ namespace MNNL {
                 float t = out_data[i];
                 gin_data[i] = gout_data[i] * (1.0f - t * t);
             }
-            rec.a->grad() += grad_input;
+            a->grad() += grad_input;
         }
 
         void backward_mul(const OpRecord& rec) {
-            if (!rec.out) return;
+            LOCK_WEAK(a, rec.a);
+            LOCK_WEAK(b, rec.b);
+            LOCK_WEAK_OR_RETURN(out, rec.out);
             prepare_backward_inputs(rec);
-            Tensor<float> grad_out_cpu = rec.out->grad().contiguous();
-            if (rec.a && rec.a->requires_grad()) {
-                if (!rec.b) {
+            Tensor<float> grad_out_cpu = out->grad().contiguous();
+            if (a && a->requires_grad()) {
+                if (!b) {
                     std::cerr << "ERROR: rec.b is null in mul backward" << std::endl;
                     return;
                 }
-                auto grad_a_ptr = grad_out_cpu * (*rec.b);
-                /*std::cout << "MUL backward: grad_out = " << grad_out_cpu.data()[0]
-                    << ", b = " << rec.b->data()[0]
-                    << ", grad_a = " << (*grad_a_ptr).data()[0] << std::endl;*/
-                rec.a->grad() += *grad_a_ptr;
+                auto grad_a_ptr = grad_out_cpu * (*b);
+                a->grad() += *grad_a_ptr;
             }
-            if (rec.b && rec.b->requires_grad()) {
-                auto grad_b_ptr = grad_out_cpu * (*rec.a);
-                rec.b->grad() += *grad_b_ptr;
+            if (b && b->requires_grad()) {
+                auto grad_b_ptr = grad_out_cpu * (*a);
+                b->grad() += *grad_b_ptr;
             }
 
         }
 
         void backward_sum(const OpRecord& rec) {
-            if (!rec.a || !rec.out) return;
+            LOCK_WEAK(out, rec.out);
+            LOCK_WEAK(a, rec.a);
+            LOCK_WEAK(b, rec.b);
+            if (!a || !out) return;
             prepare_backward_inputs(rec);
-            Tensor<float> grad_out_cpu = rec.out->grad().contiguous();
+            Tensor<float> grad_out_cpu = out->grad().contiguous();
             if (grad_out_cpu.size() == 0) return;
             float grad_val = grad_out_cpu.data()[0];
-            Tensor<float> ones = Tensor<float>::ones(rec.a->shape());
+            Tensor<float> ones = Tensor<float>::ones(a->shape());
             Tensor<float> scaled = grad_val * ones;
-            rec.a->grad() += scaled;
+            a->grad() += scaled;
         }
 
         void backward(Tensor<float>& loss) {
@@ -332,25 +355,27 @@ namespace MNNL {
             for (auto it = tape.rbegin(); it != tape.rend(); ++it) {
                 const OpRecord& rec = *it;
 
-                if (static_cast<int>(rec.type) == 0 && !rec.out) {
+                if (static_cast<int>(rec.type) == 0 && rec.out.expired()) {
                     std::cout << "    Skipping garbage record (type "
                         << static_cast<int>(rec.type) << ")" << std::endl;
                     continue;
                 }
 
-                BACKWARD_LOG("--- Processing op type " << static_cast<int>(rec.type) << " ---");
-                BACKWARD_LOG("  a=" << (rec.a ? "non-null" : "NULL") << ", requires_grad=" << (rec.a ? rec.a->requires_grad() : false));
-                BACKWARD_LOG("  b=" << (rec.b ? "non-null" : "NULL") << ", requires_grad=" << (rec.b ? rec.b->requires_grad() : false));
-                BACKWARD_LOG("  out=" << (rec.out ? "non-null" : "NULL"));
+                auto a_check = rec.a.lock();
+                auto b_check = rec.b.lock();
+                auto out_check = rec.out.lock();
 
-                if (rec.out) {
+                BACKWARD_LOG("  a=" << (a_check ? "non-null" : "NULL") << ", requires_grad=" << (a_check ? a_check->requires_grad() : false));
+                BACKWARD_LOG("  b=" << (b_check ? "non-null" : "NULL") << ", requires_grad=" << (b_check ? b_check->requires_grad() : false));
+                BACKWARD_LOG("  out=" << (out_check ? "non-null" : "NULL"));
 
+                if (out_check) {
                     std::string os;
-                    for (size_t s : rec.out->shape()) os += std::to_string(s) + " ";
+                    for (size_t s : out_check->shape()) os += std::to_string(s) + " ";
                     BACKWARD_LOG("out shape: " << os);
 
                     std::string so;
-                    for (size_t s : rec.out->grad().shape()) so += std::to_string(s) + " ";
+                    for (size_t s : out_check->grad().shape()) so += std::to_string(s) + " ";
                     BACKWARD_LOG("out grad shape: " << so);
                 }
 
@@ -376,6 +401,7 @@ namespace MNNL {
                     throw;
                 }
                 catch (...) {
+                    //clear_tape();
                     BACKWARD_LOG("Unknown exception in backward op");
                     throw;
                 }

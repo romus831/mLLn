@@ -1,1 +1,0 @@
-1. snake_case (coding Gogle style)

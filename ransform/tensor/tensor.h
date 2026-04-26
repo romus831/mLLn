@@ -13,7 +13,7 @@
 #include <cublas_v2.h>
 #include "math/gemm.h"
 #include "core/autograd.h"
-#include "concepts.h"
+#include "core/concepts.h"
 
 namespace MNNL {
     struct AlignedDeleter {
@@ -32,9 +32,10 @@ namespace MNNL {
         }
     };
 
+
+
 template<ArithmeticType T>
 class Tensor : public std::enable_shared_from_this<Tensor<T>> {
-        //static_assert(std::is_same_v<T, float>, "SIMD operations are currently supported only for float.");
     public:
 
         Tensor() noexcept
@@ -266,6 +267,10 @@ class Tensor : public std::enable_shared_from_this<Tensor<T>> {
             return t;
         }
 
+        std::weak_ptr<Tensor<T>> weak_from_this_const() const {
+            return const_cast<Tensor<T>*>(this)->weak_from_this();
+        }
+
         std::shared_ptr<Tensor<T>> operator+(const Tensor& other) const {
             auto result_shape = broadcast_shapes(shape_, other.shape_);
             auto result = std::make_shared<Tensor<T>>(result_shape);
@@ -279,14 +284,16 @@ class Tensor : public std::enable_shared_from_this<Tensor<T>> {
                 if (b.on_gpu_) b.to_cpu();
                 *result = a.ElementwiseBinary(b, std::plus<T>{});
             }
-            if (autograd::is_grad_enabled() && (requires_grad_ || other.requires_grad_)) {
-                result->set_requires_grad(true);
-                autograd::OpRecord rec = {};
-                rec.type = autograd::OpType::ADD;
-                rec.a = const_cast<Tensor<T>*>(this);
-                rec.b = const_cast<Tensor<T>*>(&other);
-                rec.out = result.get();
-                autograd::push_record(std::move(rec));
+            if constexpr (std::is_same_v<T, float>) {
+                if (autograd::is_grad_enabled() && (requires_grad_ || other.requires_grad_)) {
+                    result->set_requires_grad(true);
+                    autograd::OpRecord rec = {};
+                    rec.type = autograd::OpType::ADD;
+                    rec.a = this->weak_from_this_const();
+                    rec.b = const_cast<Tensor&>(other).weak_from_this_const();
+                    rec.out = result;
+                    autograd::push_record(std::move(rec));
+                }
             }
             return result;
         }
@@ -304,14 +311,16 @@ class Tensor : public std::enable_shared_from_this<Tensor<T>> {
                 if (b.on_gpu_) b.to_cpu();
                 *result = a.ElementwiseBinary(b, std::minus<T>{});
             }
-            if (autograd::is_grad_enabled() && (requires_grad_ || other.requires_grad_)) {
-                result->set_requires_grad(true);
-                autograd::OpRecord rec = {};
-                rec.type = autograd::OpType::SUB;
-                rec.a = const_cast<Tensor<float>*>(this);
-                rec.b = const_cast<Tensor<float>*>(&other);
-                rec.out = result.get();
-                autograd::push_record(std::move(rec));
+            if constexpr (std::is_same_v<T, float>) {
+                if (autograd::is_grad_enabled() && (requires_grad_ || other.requires_grad_)) {
+                    result->set_requires_grad(true);
+                    autograd::OpRecord rec = {};
+                    rec.type = autograd::OpType::SUB;
+                    rec.a = this->weak_from_this_const();
+                    rec.b = const_cast<Tensor&>(other).weak_from_this_const();
+                    rec.out = result;
+                    autograd::push_record(std::move(rec));
+                }
             }
             return result;
         }
@@ -329,14 +338,16 @@ class Tensor : public std::enable_shared_from_this<Tensor<T>> {
                 if (b.on_gpu_) b.to_cpu();
                 *result = a.ElementwiseBinary(b, std::multiplies<T>{});
             }
-            if (autograd::is_grad_enabled() && (requires_grad_ || other.requires_grad_)) {
-                result->set_requires_grad(true);
-                autograd::OpRecord rec = {};
-                rec.type = autograd::OpType::MUL;
-                rec.a = const_cast<Tensor<float>*>(this);
-                rec.b = const_cast<Tensor<float>*>(&other);
-                rec.out = result.get();
-                autograd::push_record(std::move(rec));
+            if constexpr (std::is_same_v<T, float>) {
+                if (autograd::is_grad_enabled() && (requires_grad_ || other.requires_grad_)) {
+                    result->set_requires_grad(true);
+                    autograd::OpRecord rec = {};
+                    rec.type = autograd::OpType::MUL;
+                    rec.a = this->weak_from_this_const();
+                    rec.b = const_cast<Tensor&>(other).weak_from_this_const();
+                    rec.out = result;
+                    autograd::push_record(std::move(rec));
+                }
             }
             return result;
         }
@@ -367,14 +378,16 @@ class Tensor : public std::enable_shared_from_this<Tensor<T>> {
                 if (b.on_gpu_) b.to_cpu();
                 *result = a.ElementwiseBinary(b, divides_with_check{});
             }
-            if (autograd::is_grad_enabled() && (requires_grad_ || other.requires_grad_)) {
-                result->set_requires_grad(true);
-                autograd::OpRecord rec = {};
-                rec.type = autograd::OpType::DIV;
-                rec.a = const_cast<Tensor<float>*>(this);
-                rec.b = const_cast<Tensor<float>*>(&other);
-                rec.out = result.get();
-                autograd::push_record(std::move(rec));
+            if constexpr (std::is_same_v<T, float>) {
+                if (autograd::is_grad_enabled() && (requires_grad_ || other.requires_grad_)) {
+                    result->set_requires_grad(true);
+                    autograd::OpRecord rec = {};
+                    rec.type = autograd::OpType::DIV;
+                    rec.a = this->weak_from_this_const();
+                    rec.b = const_cast<Tensor&>(other).weak_from_this_const();
+                    rec.out = result;
+                    autograd::push_record(std::move(rec));
+                }
             }
             return result;
         }
@@ -457,8 +470,8 @@ class Tensor : public std::enable_shared_from_this<Tensor<T>> {
                     result->set_requires_grad(true);
                     autograd::OpRecord rec = {};
                     rec.type = autograd::OpType::RELU;
-                    rec.a = const_cast<Tensor<float>*>(this);
-                    rec.out = result.get();
+                    rec.a = this->weak_from_this_const();
+                    rec.out = result;
 
                     autograd::push_record(std::move(rec));
                 }
@@ -479,8 +492,8 @@ class Tensor : public std::enable_shared_from_this<Tensor<T>> {
                     result->set_requires_grad(true);
                     autograd::OpRecord rec{};
                     rec.type = autograd::OpType::SIGMOID;
-                    rec.a = const_cast<Tensor<float>*>(this);
-                    rec.out = result.get();
+                    rec.a = this->weak_from_this_const();
+                    rec.out = result;
                     autograd::push_record(std::move(rec));
                 }
                 return result;
@@ -496,8 +509,8 @@ class Tensor : public std::enable_shared_from_this<Tensor<T>> {
                     result->set_requires_grad(true);
                     autograd::OpRecord rec{};
                     rec.type = autograd::OpType::SIGMOID;
-                    rec.a = const_cast<Tensor<float>*>(this);
-                    rec.out = result.get();
+                    rec.a = this->weak_from_this_const();
+                    rec.out = result;
                     autograd::push_record(std::move(rec));
                 }
                 return result;
@@ -516,8 +529,8 @@ class Tensor : public std::enable_shared_from_this<Tensor<T>> {
                     result->set_requires_grad(true);
                     autograd::OpRecord rec{};
                     rec.type = autograd::OpType::TANH;
-                    rec.a = const_cast<Tensor<float>*>(this);
-                    rec.out = result.get();
+                    rec.a = this->weak_from_this_const();
+                    rec.out = result;
                     autograd::push_record(std::move(rec));
                 }
                 return result;
@@ -533,8 +546,8 @@ class Tensor : public std::enable_shared_from_this<Tensor<T>> {
                     result->set_requires_grad(true);
                     autograd::OpRecord rec{};
                     rec.type = autograd::OpType::TANH;
-                    rec.a = const_cast<Tensor<float>*>(this);
-                    rec.out = result.get();
+                    rec.a = this->weak_from_this_const();
+                    rec.out = result;
                     autograd::push_record(std::move(rec));
                 }
                 return result;
@@ -565,8 +578,8 @@ class Tensor : public std::enable_shared_from_this<Tensor<T>> {
                     result->set_requires_grad(true);
                     autograd::OpRecord rec = {};
                     rec.type = autograd::OpType::LEAKY_RELU;
-                    rec.a = const_cast<Tensor<float>*>(this);
-                    rec.out = result.get();
+                    rec.a = this->weak_from_this_const();
+                    rec.out = result;
                     if (rec.type == autograd::OpType::LEAKY_RELU) rec.leaky_slope = negative_slope;
                     autograd::push_record(std::move(rec));
                 }
@@ -593,8 +606,6 @@ class Tensor : public std::enable_shared_from_this<Tensor<T>> {
         }
 
         std::shared_ptr<Tensor<float>> sum() const {
-
-
             auto result = std::make_shared<Tensor<float>>(std::vector<size_t>{1});
             T* dst = result->data();
             const T* src = data();
@@ -609,8 +620,8 @@ class Tensor : public std::enable_shared_from_this<Tensor<T>> {
 
                 autograd::OpRecord rec = {};
                 rec.type = autograd::OpType::SUM;
-                rec.a = const_cast<Tensor<float>*>(this);
-                rec.out = result.get();
+                rec.a = this->weak_from_this_const();
+                rec.out = result;
                 autograd::push_record(std::move(rec));
             }
             return result;
@@ -637,6 +648,9 @@ class Tensor : public std::enable_shared_from_this<Tensor<T>> {
 
             cublasHandle_t handle;
             cublasCreate(&handle);
+            std::cout << "matmul sizes: m=" << m << " k=" << k << " n=" << n << std::endl;
+            std::cout << "a.gpu=" << a.data_gpu() << " b.gpu=" << b.data_gpu() << " result.gpu=" << result->data_gpu() << std::endl;
+            std::cout << "result total_size=" << result->size() << " bytes=" << result->bytes() << std::endl;
             cublasStatus_t status = math::matmul_float(
                 handle,
                 static_cast<int>(m), static_cast<int>(n), static_cast<int>(k),
@@ -663,9 +677,9 @@ class Tensor : public std::enable_shared_from_this<Tensor<T>> {
                     result->set_requires_grad(true);
                     autograd::OpRecord rec{};
                     rec.type = autograd::OpType::MATMUL;
-                    rec.a = const_cast<Tensor<float>*>(this);
-                    rec.b = const_cast<Tensor<float>*>(&other);
-                    rec.out = result.get();
+                    rec.a = this->weak_from_this_const();
+                    rec.b = other.weak_from_this_const();
+                    rec.out = result;
                     autograd::push_record(std::move(rec));
                 }
             }

@@ -8,7 +8,7 @@
 
 using namespace MNNL;
 
-//#define TRAIN 0
+#define TRAIN 0
 
 void random_init(Tensor<float>& t) {
     float* data = t.data();
@@ -128,12 +128,10 @@ int main() {
 
     Tensor<float> W1, b1, W2, b2;
     model_io::load_model(model_path, W1, b1, W2, b2);
-
-    // Тестирование на всех примерах XOR
     std::cout << "\nTrained model predictions:\n";
     auto h = X.matmul(W1);
     auto h_bias = *h + b1;
-    auto h_act = h_bias->relu();          // обязательно ReLU, как при обучении
+    auto h_act = h_bias->relu();
     auto y_pred = h_act->matmul(W2);
     auto y_pred_bias = *y_pred + b2;
     auto y_act = y_pred_bias->sigmoid();

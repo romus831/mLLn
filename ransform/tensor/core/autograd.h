@@ -17,13 +17,17 @@ namespace MNNL {
 
         struct OpRecord {
             OpType type;
-            Tensor<float>* a = nullptr;
-            Tensor<float>* b = nullptr;
-            Tensor<float>* out = nullptr;
+            std::weak_ptr<Tensor<float>> a;
+            std::weak_ptr<Tensor<float>> b;
+            std::weak_ptr<Tensor<float>> out;
             float leaky_slope = 0.01f;
         };
+        template<typename T>
+        static std::shared_ptr<Tensor<T>>lock_week(const std::weak_ptr<Tensor<T>> wp) {
+            if (auto sp = wp.lock())return sp;
+            return nullptr;
+        }
 
-        // ТОЛЬКО ОБЪЯВЛЕНИЯ:
         extern thread_local std::vector<OpRecord> tape;
         extern thread_local bool grad_enabled;
 
@@ -44,5 +48,14 @@ namespace MNNL {
         void backward_matmul(const OpRecord& rec);
         void backward_sum(const OpRecord& rec);
         extern void backward(Tensor<float>& loss);
+
+#define LOCK_WEAK(var, weakPtr) auto var = (weakPtr).lock()
+#define LOCK_WEAK_OR_RETURN(var, weakPtr) \
+    auto var = (weakPtr).lock(); \
+    if (!(var)) return
+
+#define LOCK_WEAK_OR_CONTINUE(var, weakPtr) \
+    auto var = (weakPtr).lock(); \
+    if (!(var)) continue
     }
 }
